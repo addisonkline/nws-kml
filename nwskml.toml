@@ -1,0 +1,11 @@
+# nwskml configuration file (auto-generated)
+
+[fetching]
+query_limit = 50
+states_ignore = []
+
+[display]
+require_temperature = true
+require_dew_point = true
+require_pressure_barometric = false
+require_pressure_sea_level = false
