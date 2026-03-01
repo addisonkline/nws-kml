@@ -63,24 +63,10 @@ async def get_station_ids(
     Get a list of current NWS station IDs.
     """
     global _station_ids
-    if len(_station_ids) > 0:
-        return _station_ids
-    
-    # fill _station_ids using the NWS API response
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            f"{BASE_URL}/stations",
-            headers={
-                "User-Agent": get_user_agent()
-            }
-        ) as response:
-            response_json = await response.json()
-            stations = response_json.get("features")
-            station_urls = [station.get("id") for station in stations]
-            station_ids = [station_url.split("/")[-1] for station_url in station_urls]
+    if len(_station_ids) == 0:
+        await populate_station_ids(cfg)
 
-            _station_ids = station_ids
-            return _station_ids
+    return _station_ids
         
 
 async def get_station_observation_latest(
@@ -98,28 +84,14 @@ async def get_station_observation_latest(
     
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"{BASE_URL}/stations/{station_id}/observations/latest"
+            f"{BASE_URL}/stations/{station_id}/observations/latest",
+            headers={
+                "User-Agent": get_user_agent()
+            }
         ) as response:
             if (response.status >= 500) and (response.status < 600):
                 return None
             return await response.json()
-        
-
-async def get_stations_observation_latest(
-    cfg: NwskmlConfig,
-) -> list[dict[str, Any]]:
-    """
-    Get the latest observation data for all current supported stations.
-    """
-    global _station_ids
-    observations: list[dict[str, Any]] = []
-    for station_id in _station_ids:
-        observation = await get_station_observation_latest(station_id)
-        if (cfg.fetching.continue_on_5xx) and (observation is None):
-            continue
-        observations.append(observation) # type: ignore
-
-    return observations
 
 
 def get_user_agent() -> str:
