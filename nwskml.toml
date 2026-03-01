@@ -1,11 +1,16 @@
 # nwskml configuration file (auto-generated)
 
 [fetching]
-query_limit = 50
-states_ignore = []
+query_limit = 20 # number of station IDs to query per state
+query_cooldown = 0.2 # number of seconds between NWS API requests
+states_ignore = [] # list of states by ID to exclude (e.g. ['CA', 'DC', 'IL'])
+continue_on_5xx = false
 
-[display]
+[display] # configure which weather params are required for a given station in the KML
 require_temperature = true
 require_dew_point = true
 require_pressure_barometric = false
 require_pressure_sea_level = false
+require_wind_direction = true
+require_wind_speed = true
+require_wind_gust = false

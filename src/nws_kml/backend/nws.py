@@ -2,10 +2,13 @@
 # Copyright (c) 2026 Addison Kline
 
 import logging
+from importlib import metadata
+from time import sleep
 from typing import Any
 
 import aiohttp
 from fastapi import HTTPException
+from tqdm import tqdm
 
 from nws_kml.backend.config import NwskmlConfig
 from nws_kml.backend.constants import STATES
@@ -29,22 +32,28 @@ async def populate_station_ids(
 
     limit = cfg.fetching.query_limit
 
-    for state in STATES:
+    for state in tqdm(STATES, desc="getting station IDs by state"):
         if state in cfg.fetching.states_ignore:
             continue
         else:
-            logger.info(f"on state: {state}")
+            sleep(cfg.fetching.query_cooldown)
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{BASE_URL}/stations?state={state}&limit={limit}"
+                    f"{BASE_URL}/stations?state={state}&limit={limit}",
+                    headers={
+                        "User-Agent": get_user_agent()
+                    }
                 ) as response:
+                    if (cfg.fetching.continue_on_5xx) and (response.status >= 500) and (response.status < 600):
+                        continue
                     response_json = await response.json()
                     stations = response_json.get("features")
                     station_urls = [station.get("id") for station in stations]
                     station_ids = [station_url.split("/")[-1] for station_url in station_urls]
 
                     _station_ids.extend(station_ids)
-                    logger.info(f"finished populating NWS station IDs (n = {len(_station_ids)})")
+                    
+    logger.info(f"finished populating NWS station IDs (n = {len(_station_ids)})")
 
 
 async def get_station_ids(
@@ -60,7 +69,10 @@ async def get_station_ids(
     # fill _station_ids using the NWS API response
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            f"{BASE_URL}/stations"
+            f"{BASE_URL}/stations",
+            headers={
+                "User-Agent": get_user_agent()
+            }
         ) as response:
             response_json = await response.json()
             stations = response_json.get("features")
@@ -73,7 +85,7 @@ async def get_station_ids(
 
 async def get_station_observation_latest(
     station_id: int,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """
     Get the latest observation data for the given station.
     """
@@ -88,10 +100,14 @@ async def get_station_observation_latest(
         async with session.get(
             f"{BASE_URL}/stations/{station_id}/observations/latest"
         ) as response:
+            if (response.status >= 500) and (response.status < 600):
+                return None
             return await response.json()
         
 
-async def get_stations_observation_latest() -> list[dict[str, Any]]:
+async def get_stations_observation_latest(
+    cfg: NwskmlConfig,
+) -> list[dict[str, Any]]:
     """
     Get the latest observation data for all current supported stations.
     """
@@ -99,6 +115,16 @@ async def get_stations_observation_latest() -> list[dict[str, Any]]:
     observations: list[dict[str, Any]] = []
     for station_id in _station_ids:
         observation = await get_station_observation_latest(station_id)
-        observations.append(observation)
+        if (cfg.fetching.continue_on_5xx) and (observation is None):
+            continue
+        observations.append(observation) # type: ignore
 
     return observations
+
+
+def get_user_agent() -> str:
+    """
+    Create the `User-Agent` field for HTTP requests to the NWS API.
+    """
+    version = metadata.version("nws-kml")
+    return f"nws-kml/{version} (https://github.com/addisonkline/nws-kml)"

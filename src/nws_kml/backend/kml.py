@@ -2,10 +2,12 @@
 # Copyright (c) 2026 Addison Kline
 
 import logging
+from time import sleep
 from typing import Any
 
 import simplekml # type: ignore
 from fastapi import Response
+from tqdm import tqdm
 
 from nws_kml.backend.config import NwskmlConfig
 from nws_kml.backend.nws import (
@@ -34,8 +36,14 @@ async def populate_kml(
 
     _kml = simplekml.Kml()
     successes = 0
-    for station_id in station_ids:
+    for station_id in tqdm(station_ids, desc="populating KML from station data"):
+        sleep(cfg.fetching.query_cooldown)
         station_data = await get_station_observation_latest(station_id)
+
+        if (cfg.fetching.continue_on_5xx) and (station_data is None):
+            continue
+        elif station_data is None:
+            raise RuntimeError(f"got no station data for station with ID = {station_id}")
 
         try:
             _kml.newpoint(
@@ -45,7 +53,7 @@ async def populate_kml(
             )
             successes += 1
         except RuntimeError:
-            logger.warning(f"could not parse observation data from station with ID = {station_id}, continuing")
+            # logger.warning(f"could not parse observation data from station with ID = {station_id}, continuing")
             continue
         except ValueError:
             # only thrown when configured minimums aren't met
@@ -68,7 +76,13 @@ async def refresh_kml(
     kml_new = simplekml.Kml()
     successes = 0
     for station_id in station_ids:
+        sleep(cfg.fetching.query_cooldown)
         station_data = await get_station_observation_latest(station_id)
+
+        if (cfg.fetching.continue_on_5xx) and (station_data is None):
+            continue
+        elif station_data is None:
+            raise RuntimeError(f"got no station data for station with ID = {station_id}")
 
         try:
             kml_new.newpoint(
@@ -202,13 +216,50 @@ def _generate_point_description(
     sealevel_unit = sealevel.get("unitCode")
     if (cfg.display.require_pressure_sea_level) and (sealevel_val is None):
         raise ValueError("sea level pressure required but not found")
+    
+    wind_dir = properties.get("windDirection")
+    if wind_dir is None:
+        raise RuntimeError("station observation properties.windDirection is None")
+    if not isinstance(wind_dir, dict):
+        raise RuntimeError("station observation properties.windDirection must be a dict")
+    
+    wind_dir_val = wind_dir.get("value")
+    wind_dir_unit = wind_dir.get("unitCode")
+    if (cfg.display.require_wind_direction) and (wind_dir_val is None):
+        raise ValueError("wind direction required but not found")
+    
+    wind_speed = properties.get("windSpeed")
+    if wind_speed is None:
+        raise RuntimeError("station observation properties.windSpeed is None")
+    if not isinstance(wind_speed, dict):
+        raise RuntimeError("station observation properties.windSpeed must be a dict")
+    
+    wind_speed_val = wind_speed.get("value")
+    wind_speed_unit = wind_speed.get("unitCode")
+    if (cfg.display.require_wind_speed) and (wind_speed_val is None):
+        raise ValueError("wind speed required but not found")
+    
+    wind_gust = properties.get("windGust")
+    if wind_gust is None:
+        raise RuntimeError("station observation properties.windGust is None")
+    if not isinstance(wind_gust, dict):
+        raise RuntimeError("station observation properties.windGust must be a dict")
+    
+    wind_gust_val = wind_gust.get("value")
+    wind_gust_unit = wind_gust.get("unitCode")
+    if (cfg.display.require_wind_gust) and (wind_gust_val is None):
+        raise ValueError("wind gust required but not found")
 
     desc = f"""
+Current Observed Weather
 Timestamp: {timestamp}
 Temperature: {temp_val} {temp_unit}
 Dew Point: {dewpoint_val} {dewpoint_unit}
 Pressure (Barometric): {barometric_val} {barometric_unit}
 Pressure (Sea Level): {sealevel_val} {sealevel_unit}
+Wind Direction: {wind_dir_val} {wind_dir_unit}
+Wind Speed: {wind_speed_val} {wind_speed_unit}
+Wind Gusts: {wind_gust_val} {wind_gust_unit}
 """
     
     return desc
